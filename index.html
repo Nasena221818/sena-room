@@ -6,7 +6,7 @@
 <title>세나의 방 · voxel interior</title>
 <style>
   html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#070a1a; }
-  #scene { display:block; width:100%; height:100%; cursor:grab; }
+  #scene { display:block; width:100%; height:100%; cursor:grab; touch-action:none; -webkit-user-select:none; user-select:none; }
   #scene:active { cursor:grabbing; }
   .vignette {
     position:fixed; inset:0; pointer-events:none;
@@ -35,7 +35,7 @@
     <h1>세나의 방</h1>
     <p>voxel interior · under the night sky</p>
   </div>
-  <div class="hint">drag to look around · scroll to zoom</div>
+  <div class="hint">drag to look · pinch / scroll to zoom · double-tap to toggle lights</div>
   <div id="lightbtn" class="hint" style="left:auto; right:22px; transform:none; cursor:pointer; opacity:0.85;">💡 불 켜짐 &nbsp;(L)</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -583,29 +583,75 @@
   zzz.position.set(-5.6, 2.2, -2.6);
   scene.add(zzz);
 
-  /* ================= camera orbit ================= */
+  /* ================= camera orbit + touch controls ================= */
   const target = new THREE.Vector3(0, 1.5, 0);
   let theta = 0.95, phi = 1.18, radius = 8.4;
-  let dragging = false, lastX = 0, lastY = 0, lastInteract = 0;
+  let lastInteract = 0;
+  const R_MIN = 4.2, R_MAX = 9.5, PHI_MIN = 0.30, PHI_MAX = 1.52;
+
+  // unified pointer state (mouse + touch)
+  const pointers = new Map();      // pointerId -> {x, y}
+  let pinchDist = 0;               // live 2-finger distance
+  let downX = 0, downY = 0, downT = 0, downMoved = false; // single-finger tap tracker
+  let lastTapX = 0, lastTapY = 0, lastTapT = 0;          // previous clean tap (double-tap)
+
+  function clampRadius(r) { radius = Math.max(R_MIN, Math.min(R_MAX, r)); }
+
+  function rotateBy(dx, dy) {
+    theta -= dx * 0.0052;
+    phi   -= dy * 0.0042;
+    phi = Math.max(PHI_MIN, Math.min(PHI_MAX, phi));
+    lastInteract = performance.now();
+  }
 
   canvas.addEventListener("pointerdown", function (e) {
-    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     lastInteract = performance.now();
-    canvas.setPointerCapture(e.pointerId);
+    if (pointers.size === 1) {
+      downX = e.clientX; downY = e.clientY; downT = performance.now(); downMoved = false;
+    } else if (pointers.size === 2) {
+      const p = Array.from(pointers.values());
+      pinchDist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+    }
   });
+
   canvas.addEventListener("pointermove", function (e) {
-    if (!dragging) return;
-    theta -= (e.clientX - lastX) * 0.0052;
-    phi   -= (e.clientY - lastY) * 0.0042;
-    phi = Math.max(0.30, Math.min(1.52, phi));
-    lastX = e.clientX; lastY = e.clientY;
+    const prev = pointers.get(e.pointerId);
+    if (!prev) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (Math.abs(e.clientX - prev.x) + Math.abs(e.clientY - prev.y) > 1) downMoved = true;
     lastInteract = performance.now();
+    if (pointers.size === 1) {
+      rotateBy(e.clientX - prev.x, e.clientY - prev.y);
+    } else if (pointers.size === 2) {
+      const p = Array.from(pointers.values());
+      const d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+      if (pinchDist > 0 && d > 0) clampRadius(radius * (pinchDist / d)); // spread = zoom in
+      pinchDist = d;
+    }
   });
-  canvas.addEventListener("pointerup", function () { dragging = false; });
+
+  function endPointer(e) {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.delete(e.pointerId);
+    try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
+    if (pointers.size === 0) {
+      // a quick, barely-moved single-finger release counts as a tap
+      const now = performance.now();
+      if (!downMoved && now - downT < 350) {
+        // double-tap: second tap within 320ms and close in space to the previous tap
+        if (now - lastTapT < 320 && Math.hypot(downX - lastTapX, downY - lastTapY) < 36) toggleLights();
+        lastTapX = downX; lastTapY = downY; lastTapT = now;
+      }
+    }
+  }
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+
   canvas.addEventListener("wheel", function (e) {
     e.preventDefault();
-    radius *= 1 + e.deltaY * 0.0011;
-    radius = Math.max(4.2, Math.min(9.5, radius));
+    clampRadius(radius * (1 + e.deltaY * 0.0011));
     lastInteract = performance.now();
   }, { passive: false });
 
