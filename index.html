@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>세나의 방 · voxel interior</title>
+<style>
+  html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#070a1a; }
+  #scene { display:block; width:100%; height:100%; cursor:grab; }
+  #scene:active { cursor:grabbing; }
+  .vignette {
+    position:fixed; inset:0; pointer-events:none;
+    background:radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(3,5,18,0.75) 100%);
+  }
+  .title {
+    position:fixed; top:22px; left:26px; pointer-events:none;
+    font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+    color:#cdd6ff; letter-spacing:0.5px;
+    text-shadow: 0 1px 12px rgba(80,110,255,0.45);
+    user-select:none;
+  }
+  .title h1 { margin:0; font-size:19px; font-weight:600; }
+  .title p  { margin:3px 0 0; font-size:11.5px; opacity:0.62; }
+  .hint {
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+    font-family:"Segoe UI","Malgun Gothic",sans-serif; font-size:11px;
+    color:#9fb0e6; opacity:0.5; pointer-events:none; user-select:none;
+  }
+</style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <div class="vignette"></div>
+  <div class="title">
+    <h1>세나의 방</h1>
+    <p>voxel interior · under the night sky</p>
+  </div>
+  <div class="hint">drag to look around · scroll to zoom</div>
+  <div id="lightbtn" class="hint" style="left:auto; right:22px; transform:none; cursor:pointer; opacity:0.85;">💡 불 켜짐 &nbsp;(L)</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  if (typeof THREE === "undefined") {
+    document.body.innerHTML = "<p style='color:#fff;padding:40px;font-family:sans-serif'>Three.js 를 불러올 수 없어요. 인터넷 연결을 확인해 주세요.</p>";
+    return;
+  }
+
+  const canvas   = document.getElementById("scene");
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  // NOTE: no sRGB output encoding — palette colours are literal sRGB hex.
+  // Re-encoding on top of that blew colours out to white (lesson from
+  // sena-night-sky.html, the "white canopy" bug).
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x070a1a);
+  scene.fog = new THREE.Fog(0x070a1a, 55, 130);
+
+  const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 300);
+
+  /* ================= lights ================= */
+  const ambLight = new THREE.AmbientLight(0x4a4a6a, 0.9);
+  scene.add(ambLight);
+  const hemiLight = new THREE.HemisphereLight(0x59628f, 0x3a2f28, 0.8);
+  scene.add(hemiLight);
+
+  // gentle central fill — "the room is alive with warmth"
+  const fillLight = new THREE.PointLight(0xffe6c0, 0.5, 16, 1.4);
+  fillLight.position.set(0, 3.4, 0.5);
+  scene.add(fillLight);
+
+  // moonlight pouring in through the back window
+  const moonLight = new THREE.SpotLight(0xb9cdff, 2.4, 70, 0.62, 0.55, 1);
+  moonLight.position.set(-5, 8, -17);
+  moonLight.target.position.set(1.5, 0.3, 1.0);
+  scene.add(moonLight);
+  scene.add(moonLight.target);
+
+  // desk lamp (warm)
+  const lampLight = new THREE.PointLight(0xffbe78, 2.4, 10, 1.6);
+  lampLight.position.set(3.9, 3.0, -0.9);
+  scene.add(lampLight);
+
+  // lantern by the front door
+  const lanternLight = new THREE.PointLight(0xffa057, 1.3, 5.5, 1.6);
+  lanternLight.position.set(5.2, 1.75, 5.2);
+  scene.add(lanternLight);
+
+  // laptop screen glow
+  const screenLight = new THREE.PointLight(0x8fd4ff, 0.9, 3, 1.5);
+  screenLight.position.set(5.4, 2.7, 0.9);
+  scene.add(screenLight);
+
+  /* ================= outside: night sky, stars, moon ================= */
+  const starMat = new THREE.PointsMaterial({
+    color: 0xcdd6ff, size: 0.5, sizeAttenuation: true,
+    transparent: true, opacity: 0.9, depthWrite: false
+  });
+  (function buildStars() {
+    const N = 900;
+    const pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      // random point on a sphere shell of radius ~38
+      const u = Math.random(), v = Math.random();
+      const th = 2 * Math.PI * u, ph = Math.acos(2 * v - 1);
+      const r = 38 + Math.random() * 3;
+      pos[i*3]   = r * Math.sin(ph) * Math.cos(th);
+      pos[i*3+1] = r * Math.cos(ph);
+      pos[i*3+2] = r * Math.sin(ph) * Math.sin(th);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    const pts = new THREE.Points(g, starMat);
+    scene.add(pts);
+  })();
+
+  // the moon, seen through the back window
+  const moon = new THREE.Mesh(
+    new THREE.SphereGeometry(1.25, 24, 24),
+    new THREE.MeshBasicMaterial({ color: 0xfdf2cf })
+  );
+  moon.position.set(2.5, 3.2, -14);
+  scene.add(moon);
+  const halo = new THREE.Mesh(
+    new THREE.CircleGeometry(2.3, 40),
+    new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true, opacity: 0.15, depthWrite: false })
+  );
+  halo.position.set(2.5, 3.2, -14.1);
+  scene.add(halo);
+
+  /* ================= voxel engine (instanced cubes) ================= */
+  const MAX = 2500;
+  const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+  // NOTE: material colour stays white; per-instance colour carries the palette
+  const voxMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0.0 });
+  const voxels = new THREE.InstancedMesh(boxGeo, voxMat, MAX);
+  voxels.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+  const _m = new THREE.Matrix4();
+  const _q = new THREE.Quaternion();
+  const _p = new THREE.Vector3();
+  const _s = new THREE.Vector3();
+  const _c = new THREE.Color();
+  let vi = 0;
+
+  // deterministic per-tile jitter so wood grain varies
+  function h2(x, z) {
+    let n = (x * 374761393 + z * 668265263) | 0;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+  }
+
+  function voxel(x, y, z, color, sx, sy, sz) {
+    if (vi >= MAX) return;
+    _p.set(x, y, z);
+    _s.set(sx || 1, sy || 1, sz || 1);
+    _q.identity();
+    _m.compose(_p, _q, _s);
+    voxels.setMatrixAt(vi, _m);
+    _c.set(color);
+    voxels.setColorAt(vi, _c);
+    vi++;
+  }
+
+  /* ================= room shell =================
+     floor x,z in [-7, 7], walls 0.3 thick at the boundary,
+     interior height 5 (wall rows y 0..4, ceiling slab y 5).   */
+  const T = 0.3;              // wall thickness
+  const W = 7;                // half-extent (wall outer face at 7.0)
+  const WALL = "#eadfcd";
+  const WALL_ALT = "#e3d6c3";
+  const WALL_TOP = "#dccfbb";
+  const WOOD_A = "#a9744f";
+  const WOOD_B = "#9c6a48";
+  const DARK_WOOD = "#6b4a33";
+
+  // floor
+  for (let x = -W; x < W; x++) {
+    for (let z = -W; z < W; z++) {
+      const base = (z % 2 === 0) ? WOOD_A : WOOD_B;
+      const c = new THREE.Color(base);
+      const j = 0.94 + 0.08 * h2(x, z);
+      c.multiplyScalar(j);
+      voxel(x + 0.5, -0.175, z + 0.5, "#" + c.getHexString(), 1, 0.35, 1);
+    }
+  }
+
+  // ceiling (one row of tiles)
+  for (let x = -W; x < W; x++) {
+    for (let z = -W; z < W; z++) {
+      // skylight hole: x -1..1 (centers -0.5..1.5), z -2..-1
+      if (x >= -1 && x <= 1 && z >= -2 && z <= -1) {
+        // frame ring around the skylight
+        const inFrame = (x === -2 || x === 2 || z === -3 || z === 0);
+        voxel(x + 0.5, 5.5, z + 0.5, inFrame ? DARK_WOOD : "#453a4f", 1, 1, 1);
+        continue;
+      }
+      voxel(x + 0.5, 5.5, z + 0.5, "#453a4f", 1, 1, 1);
+    }
+  }
+  // skylight glass (thin, faint)
+  const skylightGlass = new THREE.Mesh(
+    new THREE.PlaneGeometry(3, 2),
+    new THREE.MeshBasicMaterial({ color: 0x9fb6ff, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false })
+  );
+  skylightGlass.rotation.x = Math.PI / 2;
+  skylightGlass.position.set(0.5, 6.15, -1.5);
+  scene.add(skylightGlass);
+
+  /* ---------- walls ---------- */
+  const HOLE_WIN = { x0: 1, x1: 3, y0: 2, y1: 3 };   // back wall window
+  const HOLE_SKY = { x0: -1, x1: 1, z0: -2, z1: -1 }; // ceiling skylight
+  const DOOR = { x0: 2, x1: 3, y0: 0, y1: 3 };        // front wall door
+
+  function wallTileColor(x, y, z) {
+    if (y === 0) return DARK_WOOD;                       // baseboard
+    if (y === 4) return WALL_TOP;                        // crown row
+    return ((x + z) % 2 === 0) ? WALL : WALL_ALT;
+  }
+
+  function buildWall(axis, fixed, flip) {
+    // axis: which coordinate is the wall plane ('x' for left/right, 'z' for back/front)
+    for (let i = -W; i < W; i++) {
+      for (let y = 0; y < 5; y++) {
+        let a, b;
+        if (axis === "x") { a = fixed; b = i; } else { a = i; b = fixed; }
+        // window hole (back wall)
+        if (flip && axis === "z" && fixed === -W &&
+            a >= HOLE_WIN.x0 && a <= HOLE_WIN.x1 && y >= HOLE_WIN.y0 && y <= HOLE_WIN.y1) {
+          continue;
+        }
+        // door (front wall)
+        if (!flip && axis === "z" && fixed === W - T &&
+            a >= DOOR.x0 && a <= DOOR.x1 && y >= DOOR.y0 && y <= DOOR.y1) {
+          continue;
+        }
+        voxel(a + 0.5, y + 0.5, b + 0.5, wallTileColor(a + b, y, 0), 1, 1, 1);
+      }
+    }
+  }
+
+  // back wall (z = -7 .. -6.7): inner face toward +z
+  (function backWall() {
+    for (let x = -W; x < W; x++)
+      for (let y = 0; y < 5; y++) {
+        if (x >= HOLE_WIN.x0 && x <= HOLE_WIN.x1 && y >= HOLE_WIN.y0 && y <= HOLE_WIN.y1) continue;
+        // window frame rows
+        let c = wallTileColor(x, y, 0);
+        if ((y === HOLE_WIN.y0 - 1 || y === HOLE_WIN.y1 + 1) && x >= HOLE_WIN.x0 && x <= HOLE_WIN.x1) c = DARK_WOOD;
+        voxel(x + 0.5, y + 0.5, -W + T / 2, c, 1, 1, T);
+      }
+  })();
+  // front wall (z = 6.7 .. 7)
+  (function frontWall() {
+    for (let x = -W; x < W; x++)
+      for (let y = 0; y < 5; y++) {
+        let c = wallTileColor(x, y, 0);
+        const inDoor = x >= DOOR.x0 && x <= DOOR.x1 && y >= DOOR.y0 && y <= DOOR.y1;
+        if (inDoor) { c = "#5d4030"; }
+        else if ((x === DOOR.x0 - 1 || x === DOOR.x1 + 1) && y <= DOOR.y1) c = "#4a3328";
+        else if (y === DOOR.y1 + 1 && x >= DOOR.x0 && x <= DOOR.x1) c = "#4a3328";
+        voxel(x + 0.5, y + 0.5, W - T / 2, c, 1, 1, T);
+      }
+  })();
+  // left wall (x = -7 .. -6.7)
+  (function leftWall() {
+    for (let z = -W + 1; z < W; z++)
+      for (let y = 0; y < 5; y++) {
+        const c = (y === 0) ? DARK_WOOD : (y === 4 ? WALL_TOP : ((z) % 2 === 0 ? WALL : WALL_ALT));
+        voxel(-W + T / 2, y + 0.5, z + 0.5, c, T, 1, 1);
+      }
+  })();
+  // right wall (x = 6.7 .. 7)
+  (function rightWall() {
+    for (let z = -W + 1; z < W; z++)
+      for (let y = 0; y < 5; y++) {
+        const c = (y === 0) ? DARK_WOOD : (y === 4 ? WALL_TOP : ((z) % 2 === 0 ? WALL : WALL_ALT));
+        voxel(W - T / 2, y + 0.5, z + 0.5, c, T, 1, 1);
+      }
+  })();
+
+  voxels.count = vi;
+  voxels.instanceMatrix.needsUpdate = true;
+  if (voxels.instanceColor) voxels.instanceColor.needsUpdate = true;
+  scene.add(voxels);
+
+  /* ================= helpers for special (non-instanced) parts ================= */
+  const unitBox = new THREE.BoxGeometry(1, 1, 1);
+  function addBox(color, x, y, z, sx, sy, sz, opts) {
+    const mat = new THREE.MeshStandardMaterial(
+      Object.assign({ color, roughness: 0.9, metalness: 0.0 }, opts || {})
+    );
+    const m = new THREE.Mesh(unitBox, mat);
+    m.position.set(x, y, z);
+    m.scale.set(sx, sy, sz);
+    scene.add(m);
+    return m;
+  }
+  function addBasic(color, x, y, z, sx, sy, sz, opacity) {
+    const mat = new THREE.MeshBasicMaterial({ color });
+    if (opacity !== undefined) { mat.transparent = true; mat.opacity = opacity; }
+    const m = new THREE.Mesh(unitBox, mat);
+    m.position.set(x, y, z);
+    m.scale.set(sx, sy, sz);
+    scene.add(m);
+    return m;
+  }
+
+  /* ================= window glass + bench ================= */
+  const glassMat = new THREE.MeshBasicMaterial({
+    color: 0x9fb6ff, transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false
+  });
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(3, 2), glassMat);
+  glass.position.set(2.5, 3, -W + T + 0.08);
+  scene.add(glass);
+  // bench under the window
+  addBox("#7a5a40", 2.5, 0.45, -6.25, 3.2, 0.9, 0.9);
+  addBox("#b9a7d6", 2.5, 0.98, -6.25, 2.9, 0.26, 0.78);
+
+  /* ================= bed (left side) ================= */
+  addBox("#7a5a40", -4.9, 0.35, -1.2, 3.6, 0.7, 5.2);     // platform
+  addBox("#7a5a40", -6.55, 1.6, -1.2, 0.5, 2.6, 5.2);     // headboard
+  addBox("#f4efe6", -4.9, 1.0, -1.2, 3.4, 0.6, 5.0);      // mattress
+  addBox("#f2a7c3", -4.85, 1.35, 0.1, 3.35, 0.5, 3.0);    // blanket
+  addBox("#f8c9dc", -4.85, 1.55, -1.1, 3.36, 0.18, 0.5);  // blanket stripe
+  addBox("#fbf7ef", -5.7, 1.5, -2.6, 1.7, 0.45, 0.9);     // pillow
+  addBox("#f287b0", -4.55, 1.5, -2.5, 0.45, 0.45, 0.5);  // twintail puff 1
+  addBox("#f287b0", -4.55, 1.5, -1.85, 0.45, 0.45, 0.5); // twintail puff 2
+
+  /* ================= rug (center) ================= */
+  (function rug() {
+    const cx = 0.2, cz = 0.6, rx = 2.4, rz = 1.6;
+    for (let x = -1.8; x <= 2.2; x += 0.4)
+      for (let z = -1.2; z <= 2.4; z += 0.4) {
+        const t = ((x - cx) / rx) ** 2 + ((z - cz) / rz) ** 2;
+        if (t > 1) continue;
+        const ring = t > 0.72 ? "#9c86c2" : "#b9a7d6";
+        addBox(ring, x, 0.06, z, 0.42, 0.12, 0.42);
+      }
+  })();
+
+  /* ================= desk + chair (right side) ================= */
+  addBox("#8a6a4a", 4.9, 2.0, 0.5, 3.0, 0.35, 3.6);            // desktop
+  [[3.7, -0.9], [6.1, -0.9], [3.7, 1.9], [6.1, 1.9]].forEach(function (L) {
+    addBox("#6f5238", L[0], 0.95, L[1], 0.3, 1.85, 0.3);       // legs
+  });
+  // lamp
+  addBox("#4a5568", 3.9, 2.25, -0.9, 0.6, 0.12, 0.6);
+  addBox("#4a5568", 3.9, 2.75, -0.9, 0.1, 0.9, 0.1);
+  addBox("#48605e", 3.9, 3.25, -0.9, 0.62, 0.42, 0.62);
+  const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0 });
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 16), bulbMat);
+  bulb.position.set(3.9, 3.02, -0.9);
+  scene.add(bulb);
+  // laptop
+  addBox("#3a4152", 5.35, 2.25, 0.9, 1.5, 0.12, 1.0);
+  const screen = new THREE.Mesh(unitBox, new THREE.MeshBasicMaterial({ color: 0xbfe3ff }));
+  screen.position.set(5.95, 2.85, 0.9);
+  screen.scale.set(0.1, 1.05, 1.5);
+  screen.rotation.z = 0.2;
+  scene.add(screen);
+  // mug + books + cat
+  addBox("#c47ba3", 4.1, 2.35, 1.6, 0.3, 0.35, 0.3);
+  addBox("#c47ba3", 3.92, 2.35, 1.6, 0.1, 0.2, 0.15);
+  addBox("#b0565e", 4.0, 2.28, 0.2, 0.9, 0.12, 0.6);
+  addBox("#5a7d9a", 4.05, 2.42, 0.25, 0.8, 0.12, 0.55);
+  // little cat
+  addBox("#aab4c8", 5.55, 2.35, 1.9, 0.7, 0.4, 0.34);
+  addBox("#aab4c8", 5.1, 2.5, 1.9, 0.34, 0.32, 0.32);
+  addBox("#8d99b3", 4.98, 2.72, 1.78, 0.1, 0.12, 0.1);
+  addBox("#8d99b3", 4.98, 2.72, 2.02, 0.1, 0.12, 0.1);
+  addBox("#aab4c8", 5.95, 2.45, 1.9, 0.3, 0.22, 0.14);
+  addBox("#aab4c8", 6.1, 2.6, 1.9, 0.14, 0.24, 0.12);
+  // stool
+  addBox("#7a5a40", 2.6, 1.25, 0.6, 1.0, 0.22, 1.0);
+  [[2.24, 0.24], [2.96, 0.24], [2.24, 0.96], [2.96, 0.96]].forEach(function (L) {
+    addBox("#5f4630", L[0], 0.55, L[1], 0.14, 1.1, 0.14);
+  });
+
+  /* ================= bookshelf (front wall) ================= */
+  addBox("#6b4a33", -4.2, 2.2, 6.6, 0.25, 4.4, 0.55);
+  addBox("#6b4a33", -1.8, 2.2, 6.6, 0.25, 4.4, 0.55);
+  [0.9, 2.0, 3.1, 4.2].forEach(function (y) {
+    addBox("#6b4a33", -3.0, y, 6.6, 2.4, 0.16, 0.55);
+  });
+  const bookColors = ["#b0565e", "#5a7d9a", "#7a9a5e", "#c9974f", "#8f6fae", "#c47ba3"];
+  let bi = 0;
+  [0.9, 2.0, 3.1].forEach(function (y) {
+    for (let k = 0; k < 8; k++) {
+      const x = -3.95 + k * 0.27;
+      const h = 0.55 + ((k * 7 + y * 3) % 3) * 0.07;
+      addBox(bookColors[(bi++) % bookColors.length], x, y + 0.08 + h / 2, 6.6, 0.2, h, 0.4);
+    }
+  });
+  // voxel heart on the top shelf
+  (function heart() {
+    const P = [
+      ".XX.XX.",
+      "XXXXXXX",
+      "XXXXXXX",
+      ".XXXXX.",
+      "..XXX..",
+      "...X..."
+    ];
+    const v = 0.12, ox = -3.55, oy = 4.35, oz = 6.55;
+    for (let r = 0; r < P.length; r++)
+      for (let c = 0; c < P[r].length; c++)
+        if (P[r][c] === "X")
+          addBox("#f287b0", ox + c * v, oy + r * v, oz, v * 0.92, v * 0.92, v * 0.92);
+  })();
+
+  /* ================= nightstand + candy jar ================= */
+  addBox("#7a5a40", -6.3, 0.7, 2.9, 1.2, 1.4, 1.2);
+  addBox("#8a6a4a", -6.3, 1.45, 2.9, 1.3, 0.12, 1.3);
+  const jarGlass = new THREE.Mesh(unitBox, new THREE.MeshStandardMaterial({
+    color: 0xcfe3ff, roughness: 0.15, metalness: 0.0,
+    transparent: true, opacity: 0.3
+  }));
+  jarGlass.position.set(-6.3, 2.15, 2.9);
+  jarGlass.scale.set(0.85, 1.25, 0.85);
+  scene.add(jarGlass);
+  addBox("#eadfcd", -6.3, 2.85, 2.9, 0.95, 0.16, 0.95);          // lid
+  const candyColors = ["#ff9ec4", "#ffd166", "#9be38a", "#8ecbff", "#f287b0", "#c9974f"];
+  candyColors.forEach(function (cc, i) {
+    const dx = (i % 3 - 1) * 0.2, dz = (Math.floor(i / 3) - 0.5) * 0.22;
+    addBox(cc, -6.3 + dx, 1.78 + Math.floor(i / 4) * 0.2, 2.9 + dz, 0.2, 0.18, 0.2);
+  });
+
+  /* ================= telescope (corner by the skylight) ================= */
+  (function telescope() {
+    addBox("#4a3a33", 2.1, 0.6, -4.6, 0.12, 1.2, 0.12);
+    addBox("#4a3a33", 2.5, 0.6, -4.6, 0.12, 1.2, 0.12);
+    addBox("#4a3a33", 2.3, 0.6, -5.0, 0.12, 1.2, 0.12);
+    addBox("#39415e", 2.3, 1.25, -4.8, 0.3, 0.24, 0.3);
+    // tube: 6 cubes along an up-sloped direction toward the skylight/window
+    const dx = -0.5, dy = 0.8, dz = -0.333;
+    for (let i = 0; i < 6; i++) {
+      const d = 0.35 + i * 0.42;
+      const col = (i === 5) ? "#c9a35f" : (i === 0 ? "#2e3550" : "#39415e");
+      const sz = (i === 0) ? 0.28 : 0.34;
+      addBox(col, 2.3 + dx * d, 1.35 + dy * d, -4.8 + dz * d, sz, sz, sz);
+    }
+  })();
+
+  /* ================= lantern by the door ================= */
+  addBox("#4a3a33", 5.2, 0.7, 5.2, 0.14, 1.4, 0.14);
+  addBox("#4a3a33", 5.2, 1.45, 5.2, 0.5, 0.1, 0.5);
+  const lanternGlass = new THREE.Mesh(unitBox, new THREE.MeshBasicMaterial({
+    color: 0xffd9a0, transparent: true, opacity: 0.85
+  }));
+  lanternGlass.position.set(5.2, 1.75, 5.2);
+  lanternGlass.scale.set(0.4, 0.5, 0.4);
+  scene.add(lanternGlass);
+  const coreMat = new THREE.MeshBasicMaterial({ color: 0xfff1c4 });
+  const lanternCore = new THREE.Mesh(unitBox, coreMat);
+  lanternCore.position.set(5.2, 1.75, 5.2);
+  lanternCore.scale.set(0.2, 0.26, 0.2);
+  scene.add(lanternCore);
+
+  /* ================= door knob + nameplate + poster ================= */
+  const knob = new THREE.Mesh(unitBox, new THREE.MeshBasicMaterial({ color: 0xd9b36a }));
+  knob.position.set(3.72, 2.0, W - T - 0.02);
+  knob.scale.set(0.12, 0.12, 0.08);
+  scene.add(knob);
+
+  function makeCanvasTex(w, h, draw) {
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    draw(c.getContext("2d"), w, h);
+    return new THREE.CanvasTexture(c);
+  }
+  // nameplate above the front door: "세나의 방"
+  const plateTex = makeCanvasTex(512, 128, function (g, w, h) {
+    g.fillStyle = "#5a4030"; g.fillRect(0, 0, w, h);
+    g.strokeStyle = "#3f2c20"; g.lineWidth = 10; g.strokeRect(8, 8, w - 16, h - 16);
+    g.fillStyle = "#ffe9c9";
+    g.font = "600 58px 'Malgun Gothic', 'Segoe UI', sans-serif";
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText("세나의 방", w / 2 - 14, h / 2);
+    g.fillStyle = "#f287b0";
+    g.font = "44px 'Malgun Gothic', sans-serif";
+    g.fillText("\u2661", w / 2 + 168, h / 2 + 2);
+  });
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 0.62),
+    new THREE.MeshBasicMaterial({ map: plateTex }));
+  plate.position.set(3.0, 4.55, W - T - 0.03);
+  plate.rotation.y = Math.PI;
+  scene.add(plate);
+
+  // poster on the front wall: heart + "sena ♡ sera"
+  const posterTex = makeCanvasTex(256, 340, function (g, w, h) {
+    g.fillStyle = "#1d2342"; g.fillRect(0, 0, w, h);
+    g.strokeStyle = "#3a4470"; g.lineWidth = 8; g.strokeRect(6, 6, w - 12, h - 12);
+    g.fillStyle = "#f287b0";
+    g.font = "120px 'Malgun Gothic', sans-serif";
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText("\u2661", w / 2, h / 2 - 40);
+    g.fillStyle = "#cdd6ff";
+    g.font = "30px 'Malgun Gothic', sans-serif";
+    g.fillText("sena \u2661 sera", w / 2, h - 70);
+    g.fillStyle = "#8f9ac9";
+    g.font = "22px 'Malgun Gothic', sans-serif";
+    g.fillText("밤하늘 아래", w / 2, h - 34);
+  });
+  const poster = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.7),
+    new THREE.MeshBasicMaterial({ map: posterTex }));
+  poster.position.set(-1.2, 3.0, W - T - 0.03);
+  poster.rotation.y = Math.PI;
+  scene.add(poster);
+
+  /* ================= fireflies near the window ================= */
+  const flies = [];
+  for (let i = 0; i < 9; i++) {
+    const f = new THREE.Mesh(unitBox, new THREE.MeshBasicMaterial({
+      color: 0xc8ff7a, transparent: true, opacity: 0.9
+    }));
+    f.scale.setScalar(0.09);
+    f.userData = {
+      bx: -4 + Math.random() * 8,
+      by: 1.0 + Math.random() * 2.2,
+      bz: -6.2 + Math.random() * 3.0,
+      px: Math.random() * Math.PI * 2,
+      py: Math.random() * Math.PI * 2,
+      sp: 0.4 + Math.random() * 0.7
+    };
+    scene.add(f);
+    flies.push(f);
+  }
+
+  /* ================= lights on/off (sleep) mode ================= */
+  const C_BULB_ON = new THREE.Color(0xffd9a0), C_BULB_OFF = new THREE.Color(0x6b6152);
+  const C_CORE_ON = new THREE.Color(0xfff1c4), C_CORE_OFF = new THREE.Color(0x54493c);
+  const LS = {
+    sleep: false,
+    amb: 0.9, hemi: 0.8, fill: 0.5, lamp: 1.15, lan: 0.8, scr: 0.55, moon: 2.2,
+    fly: 1.0, halo: 0.15, bulb: 1.0, core: 1.0
+  };
+  function applyLights(dt, t) {
+    const T = LS.sleep
+      ? { amb: 0.34, hemi: 0.42, fill: 0.06, lamp: 0.0, lan: 0.2, scr: 0.0, moon: 1.9, fly: 1.8, halo: 0.34, bulb: 0.15, core: 0.3 }
+      : { amb: 0.90, hemi: 0.80, fill: 0.5, lamp: 1.15, lan: 0.8, scr: 0.55, moon: 2.2, fly: 1.0, halo: 0.15, bulb: 1.0, core: 1.0 };
+    const k = Math.min(1, dt * 2.5);
+    for (const key in T) LS[key] += (T[key] - LS[key]) * k;
+    ambLight.intensity = LS.amb;
+    hemiLight.intensity = LS.hemi;
+    fillLight.intensity = LS.fill;
+    // desk lamp keeps a tiny warm flicker while on
+    lampLight.intensity = LS.lamp * (1 + 0.05 * Math.sin(t * 7.3) + 0.04 * Math.sin(t * 13.7));
+    lanternLight.intensity = LS.lan;
+    screenLight.intensity = LS.scr;
+    moonLight.intensity = LS.moon;
+    halo.material.opacity = LS.halo + 0.03 * Math.sin(t * 0.7);
+    lanternGlass.material.opacity = (0.16 + 0.66 * (LS.lan / 0.8)) * 0.85 + 0.05 * Math.sin(t * 3.1);
+    bulbMat.color.copy(C_BULB_OFF).lerp(C_BULB_ON, LS.bulb);
+    coreMat.color.copy(C_CORE_OFF).lerp(C_CORE_ON, LS.core);
+  }
+  const lightbtn = document.getElementById("lightbtn");
+  function toggleLights() {
+    LS.sleep = !LS.sleep;
+    lightbtn.textContent = LS.sleep ? "🌙 불 꺼짐 · 세나, 잠든 중..." : "💡 불 켜짐 \u00a0(L)";
+  }
+  lightbtn.addEventListener("click", toggleLights);
+  window.addEventListener("keydown", function (e) {
+    if (e.key === "l" || e.key === "L") toggleLights();
+  });
+
+  /* ================= "zZ" above the pillow (sleep mode) ================= */
+  const zzzTex = (function () {
+    const c = document.createElement("canvas"); c.width = 128; c.height = 128;
+    const g = c.getContext("2d");
+    g.fillStyle = "rgba(214,222,255,0.95)";
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.font = "700 78px 'Segoe UI', sans-serif";
+    g.fillText("z", 40, 74);
+    g.font = "700 54px 'Segoe UI', sans-serif";
+    g.fillText("Z", 86, 44);
+    return new THREE.CanvasTexture(c);
+  })();
+  const zzz = new THREE.Sprite(new THREE.SpriteMaterial({ map: zzzTex, transparent: true, opacity: 0, depthWrite: false }));
+  zzz.scale.set(1.0, 1.0, 1);
+  zzz.position.set(-5.6, 2.2, -2.6);
+  scene.add(zzz);
+
+  /* ================= camera orbit ================= */
+  const target = new THREE.Vector3(0, 1.5, 0);
+  let theta = 0.95, phi = 1.18, radius = 8.4;
+  let dragging = false, lastX = 0, lastY = 0, lastInteract = 0;
+
+  canvas.addEventListener("pointerdown", function (e) {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    lastInteract = performance.now();
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener("pointermove", function (e) {
+    if (!dragging) return;
+    theta -= (e.clientX - lastX) * 0.0052;
+    phi   -= (e.clientY - lastY) * 0.0042;
+    phi = Math.max(0.30, Math.min(1.52, phi));
+    lastX = e.clientX; lastY = e.clientY;
+    lastInteract = performance.now();
+  });
+  canvas.addEventListener("pointerup", function () { dragging = false; });
+  canvas.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    radius *= 1 + e.deltaY * 0.0011;
+    radius = Math.max(4.2, Math.min(9.5, radius));
+    lastInteract = performance.now();
+  }, { passive: false });
+
+  function updateCamera() {
+    const sp = Math.sin(phi);
+    camera.position.set(
+      target.x + radius * sp * Math.sin(theta),
+      target.y + radius * Math.cos(phi),
+      target.z + radius * sp * Math.cos(theta)
+    );
+    camera.lookAt(target);
+  }
+
+  window.addEventListener("resize", function () {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  /* ================= animate ================= */
+  let prev = performance.now();
+  function loop() {
+    requestAnimationFrame(loop);
+    const now = performance.now();
+    const t = now / 1000;
+    const dt = Math.min(0.05, (now - prev) / 1000);
+    prev = now;
+
+    // idle auto-orbit
+    if (now - lastInteract > 4000) theta += dt * 0.05;
+    updateCamera();
+
+    // star twinkle
+    starMat.opacity = 0.72 + 0.2 * Math.sin(t * 1.6);
+    // lights on/off blend
+    applyLights(dt, t);
+    // glass shimmer
+    glassMat.opacity = 0.12 + 0.03 * Math.sin(t * 0.8);
+    // fireflies (a little brighter when the room is asleep)
+    for (let i = 0; i < flies.length; i++) {
+      const f = flies[i], u = f.userData;
+      f.position.set(
+        u.bx + Math.sin(t * u.sp + u.px) * 0.5,
+        u.by + Math.sin(t * u.sp * 0.8 + u.py) * 0.3,
+        u.bz + Math.cos(t * u.sp * 0.6 + u.px) * 0.5
+      );
+      f.material.opacity = (0.35 + 0.4 * Math.sin(t * (1.2 + u.sp) + u.px)) * LS.fly;
+    }
+    // zZ drifting above the pillow (sleep mode)
+    if (LS.sleep) {
+      const zp = (t % 3) / 3;
+      zzz.position.set(-5.6 + Math.sin(t * 0.8) * 0.25, 2.1 + zp * 1.5, -2.6);
+      zzz.material.opacity = Math.sin(zp * Math.PI) * 0.85;
+      const zs = 0.9 + zp * 0.8;
+      zzz.scale.set(zs, zs, 1);
+    } else {
+      zzz.material.opacity *= 0.88;
+    }
+
+    renderer.render(scene, camera);
+  }
+  loop();
+})();
+</script>
+</body>
+</html>
