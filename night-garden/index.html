@@ -206,6 +206,7 @@ function init() {
   buildTrees();
   buildFence();
   buildFireflies();
+  buildSkyPlaque();
 
   window.addEventListener('resize', function () {
     camera.aspect = innerWidth / innerHeight;
@@ -393,6 +394,72 @@ function buildFireflies() {
       rad: 0.8 + rand() * 1.8, ys: 0.6 + rand() * 0.9
     });
   }
+}
+
+/* ---------- 오늘의 하늘 안내판 ---------- */
+function skyPlaqueTexture() {
+  var cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 400;
+  var g = cv.getContext('2d');
+  g.fillStyle = '#0b1230';
+  g.fillRect(0, 0, 512, 400);
+  g.strokeStyle = 'rgba(160, 190, 255, 0.55)';
+  g.lineWidth = 3;
+  g.strokeRect(10, 10, 492, 380);
+  g.textAlign = 'center';
+  g.fillStyle = '#ffe9b0';
+  g.font = '600 42px "Malgun Gothic", "Segoe UI", sans-serif';
+  g.fillText('✦ 오늘의 하늘 ✦', 256, 78);
+  g.fillStyle = '#9db4e8';
+  g.font = '22px "Malgun Gothic", sans-serif';
+  g.fillText('2026년 9월 11일 (금) · 서울', 256, 116);
+  g.strokeStyle = 'rgba(160, 190, 255, 0.35)';
+  g.beginPath(); g.moveTo(70, 138); g.lineTo(442, 138); g.stroke();
+  var lines = [
+    '달 — 신월 (0.0%)',
+    '저녁 — 서쪽 하늘의 금성',
+    '머리 위 — 여름의 삼각형',
+    '밤 — 동쪽에서 토성 상승',
+    '새벽 — 동쪽의 화성 · 목성'
+  ];
+  g.fillStyle = '#cfe0ff';
+  g.font = '26px "Malgun Gothic", sans-serif';
+  lines.forEach(function (ln, i) { g.fillText(ln, 256, 186 + i * 40); });
+  g.fillStyle = 'rgba(255, 233, 176, 0.8)';
+  g.font = '20px sans-serif';
+  g.fillText('·   ✦   ·', 256, 384 - 26);
+  return new THREE.CanvasTexture(cv);
+}
+
+function buildSkyPlaque() {
+  var tex = skyPlaqueTexture();
+  var board = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.8, 3.75),
+    new THREE.MeshBasicMaterial({ map: tex, fog: false, side: THREE.DoubleSide })
+  );
+  var bx = 11, bz = 11, by = 2.7;
+  board.position.set(bx, by, bz);
+  // 정원 중심(=카메라 시작 방향)을 향하게
+  board.rotation.y = Math.atan2(-bx, -bz);
+  scene.add(board);
+
+  // 뒤에서 은은한 빛
+  var glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(), color: 0x9db8ff, transparent: true, opacity: 0.16, fog: false
+  }));
+  glow.scale.set(8, 6.4, 1);
+  glow.position.set(bx + 0.2, by, bz + 0.2);
+  scene.add(glow);
+
+  // 두 개의 나무 기둥 (보드 너비 방향 = 회전각 + 90°)
+  var wa = board.rotation.y + Math.PI / 2, off = 2.0;
+  var posts = [];
+  [1, -1].forEach(function (s) {
+    var px = bx + Math.cos(wa) * off * s, pz = bz + Math.sin(wa) * off * s;
+    for (var y = 0.2; y <= 1.8; y += 0.7)
+      posts.push({ x: px, y: y, z: pz, c: new THREE.Color(0x5d4327).multiplyScalar(0.9 + 0.1 * (y / 2)) });
+  });
+  voxels(posts, { cast: false });
 }
 
 /* ---------- 유성 ---------- */
