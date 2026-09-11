@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>세나의 밤 정원</title>
+<style>
+  html, body { margin:0; padding:0; overflow:hidden; background:#05081a; width:100%; height:100%; }
+  canvas { display:block; }
+  #title {
+    position:absolute; top:22px; left:50%; transform:translateX(-50%);
+    text-align:center; pointer-events:none; user-select:none;
+    font-family:'Segoe UI','Malgun Gothic',sans-serif;
+    color:#cfe0ff; text-shadow:0 0 14px rgba(130,170,255,.75), 0 2px 6px rgba(0,0,0,.6);
+    z-index:10;
+  }
+  #title h1 { margin:0; font-size:26px; font-weight:600; letter-spacing:6px; }
+  #title p { margin:8px 0 0; font-size:11px; letter-spacing:3px; opacity:.65; }
+  #hint {
+    position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
+    font-family:'Segoe UI','Malgun Gothic',sans-serif; font-size:11px;
+    color:#9db4e8; opacity:.55; letter-spacing:1px;
+    pointer-events:none; user-select:none; z-index:10;
+  }
+</style>
+</head>
+<body>
+<div id="title">
+  <h1>✦ 세나의 밤 정원 ✦</h1>
+  <p>SENA'S NOCTURNE GARDEN</p>
+</div>
+<div id="hint">드래그 : 회전 &nbsp;·&nbsp; 휠 : 줌 &nbsp;·&nbsp; 우클릭 드래그 : 이동</div>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script>
+if (typeof THREE === 'undefined') {
+  var s0 = document.createElement('script');
+  s0.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js';
+  s0.onload = function () { loadControls(); };
+  s0.onerror = function () {
+    document.getElementById('hint').textContent = 'Three.js 로드를 실패했어요. 인터넷 연결을 확인해 주세요.';
+  };
+  document.head.appendChild(s0);
+} else {
+  loadControls();
+}
+
+function loadControls() {
+  var s1 = document.createElement('script');
+  s1.src = 'https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js';
+  s1.onload = function () { init(); };
+  s1.onerror = function () {
+    // OrbitControls 없이도 동작하도록 폴백 (직접 회전 구현)
+    window.THREE = window.THREE || {};
+    THREE.OrbitControls = function (camera, dom) {
+      this.camera = camera; this.domElement = dom;
+      this.target = new THREE.Vector3();
+      this.autoRotate = false; this.autoRotateSpeed = 0.5;
+      this.enableDamping = false; this.dampingFactor = 0.06;
+      this.minDistance = 8; this.maxDistance = 140;
+      this.maxPolarAngle = Math.PI * 0.495;
+      var theta = 0, phi = 1.1, radius = 60;
+      var dragging = false, px = 0, py = 0;
+      var self = this;
+      dom.addEventListener('pointerdown', function (e) { dragging = true; self.autoRotate = false; px = e.clientX; py = e.clientY; });
+      window.addEventListener('pointerup', function () { dragging = false; });
+      window.addEventListener('pointermove', function (e) {
+        if (!dragging) return;
+        theta -= (e.clientX - px) * 0.005;
+        phi = Math.max(0.15, Math.min(self.maxPolarAngle, phi - (e.clientY - py) * 0.005));
+        px = e.clientX; py = e.clientY;
+      });
+      dom.addEventListener('wheel', function (e) {
+        e.preventDefault();
+        radius = Math.max(self.minDistance, Math.min(self.maxDistance, radius * (1 + e.deltaY * 0.001)));
+      }, { passive: false });
+      this.update = function () {
+        if (self.autoRotate) theta += 0.0012;
+        var sp = Math.sin(phi), cp = Math.cos(phi);
+        self.camera.position.set(
+          self.target.x + radius * sp * Math.sin(theta),
+          self.target.y + radius * cp,
+          self.target.z + radius * sp * Math.cos(theta)
+        );
+        self.camera.lookAt(self.target);
+      };
+    };
+    init();
+  };
+  document.head.appendChild(s1);
+}
+</script>
+
+<script>
+/* =========================================================
+   세나의 밤 정원 (Sena's Nocturne Garden) — voxel scene
+   개발자님을 위해 세나가 직접 가꾼 작은 정원이에요.
+   ========================================================= */
+var scene, camera, renderer, controls, clock;
+var starMesh, starData = [];
+var fireflies = [];
+var smokePuffs = [];
+var houseLight;
+var shoot = null, shootTimer = 3;
+
+var UNIT = new THREE.BoxGeometry(1, 1, 1);
+
+function rng(seed) {
+  var a = seed;
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    var t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+var rand = rng(20260824);
+
+/* ---------- 헬퍼 ---------- */
+function voxels(list, opts) {
+  opts = opts || {};
+  var mat = opts.mat || new THREE.MeshLambertMaterial({ color: 0xffffff });
+  var mesh = new THREE.InstancedMesh(UNIT, mat, list.length);
+  var d = new THREE.Object3D(), c = new THREE.Color();
+  for (var i = 0; i < list.length; i++) {
+    var v = list[i];
+    d.position.set(v.x, v.y, v.z);
+    d.updateMatrix();
+    mesh.setMatrixAt(i, d.matrix);
+    c.set(v.c);
+    mesh.setColorAt(i, c);
+  }
+  mesh.castShadow = opts.cast !== false;
+  mesh.receiveShadow = opts.receive !== false;
+  scene.add(mesh);
+  return mesh;
+}
+
+function glowTexture() {
+  var cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  var g = cv.getContext('2d');
+  var grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(255, 244, 200, 0.9)');
+  grad.addColorStop(0.35, 'rgba(255, 236, 170, 0.35)');
+  grad.addColorStop(1, 'rgba(255, 230, 150, 0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(cv);
+}
+
+function isPath(x, z) { return (x === -1 || x === 0) && z >= 6 && z <= 14; }
+
+/* ---------- 초기화 ---------- */
+function init() {
+  if (typeof THREE === 'undefined') {
+    document.getElementById('hint').textContent = 'Three.js 로드를 실패했어요. 인터넷 연결을 확인해 주세요.';
+    return;
+  }
+  clock = new THREE.Clock();
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05091c);
+  scene.fog = new THREE.FogExp2(0x0a1030, 0.0045);
+
+  camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 800);
+  camera.position.set(30, 19, 36);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  if (THREE.OrbitControls) {
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 4, 0);
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.5;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.maxPolarAngle = Math.PI * 0.495;
+    controls.minDistance = 8;
+    controls.maxDistance = 140;
+  } else {
+    controls = new THREE.OrbitControls(camera, renderer.domElement); // 폴백 구현
+  }
+
+  scene.add(new THREE.AmbientLight(0x40507e, 0.65));
+  var moonLight = new THREE.DirectionalLight(0xa8c0ff, 0.75);
+  moonLight.position.set(-35, 48, -30);
+  moonLight.castShadow = true;
+  moonLight.shadow.mapSize.set(2048, 2048);
+  var sc = moonLight.shadow.camera;
+  sc.left = -45; sc.right = 45; sc.top = 45; sc.bottom = -45; sc.far = 160;
+  scene.add(moonLight);
+
+  houseLight = new THREE.PointLight(0xffc887, 1.15, 26, 2);
+  houseLight.position.set(0, 3.2, 0);
+  scene.add(houseLight);
+
+  buildGround();
+  buildMoon();
+  buildStars();
+  buildHouse();
+  buildTrees();
+  buildFence();
+  buildFireflies();
+
+  window.addEventListener('resize', function () {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+  renderer.domElement.addEventListener('pointerdown', function () { controls.autoRotate = false; });
+
+  animate();
+}
+
+/* ---------- 바닥 (초원 + 돌길) ---------- */
+function buildGround() {
+  var R = 20, list = [];
+  for (var x = -R; x <= R; x++)
+    for (var z = -R; z <= R; z++) {
+      if (x * x + z * z > R * R) continue;
+      var c;
+      if (isPath(x, z)) {
+        var v2 = 0.42 + rand() * 0.14;
+        c = new THREE.Color(v2 * 0.78, v2 * 0.82, v2 * 0.98);
+      } else {
+        var v = 0.085 + rand() * 0.075;
+        c = new THREE.Color(v * 0.55, v * 1.15, v * 0.75);
+      }
+      list.push({ x: x, y: -0.5, z: z, c: c });
+    }
+  voxels(list, { cast: false });
+}
+
+/* ---------- 보름달 ---------- */
+function buildMoon() {
+  var list = [], R = 4;
+  for (var x = -R; x <= R; x++)
+    for (var y = -R; y <= R; y++)
+      for (var z = -R; z <= R; z++) {
+        if (Math.sqrt(x * x + y * y + z * z) <= R + 0.2) {
+          var v = 0.92 + rand() * 0.08;
+          list.push({ x: x, y: y, z: z, c: new THREE.Color(v, v * 0.97, v * 0.86) });
+        }
+      }
+  var mesh = voxels(list, {
+    mat: new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }),
+    cast: false
+  });
+  mesh.position.set(-38, 33, -48);
+
+  var glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(), color: 0xffedb8, transparent: true, opacity: 0.55, fog: false
+  }));
+  glow.scale.set(26, 26, 1);
+  glow.position.copy(mesh.position);
+  scene.add(glow);
+}
+
+/* ---------- 반짝이는 별들 ---------- */
+function buildStars() {
+  var N = 320;
+  starData = [];
+  var geo = new THREE.BoxGeometry(0.55, 0.55, 0.55);
+  var mat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, transparent: true, opacity: 0.95 });
+  starMesh = new THREE.InstancedMesh(geo, mat, N);
+  var c = new THREE.Color();
+  for (var i = 0; i < N; i++) {
+    var theta = rand() * Math.PI * 2;
+    var phi = Math.acos(1 - rand() * 0.92);
+    var r = 70 + rand() * 45;
+    starData.push({
+      x: r * Math.sin(phi) * Math.cos(theta),
+      y: r * Math.cos(phi) + 4,
+      z: r * Math.sin(phi) * Math.sin(theta),
+      phase: rand() * Math.PI * 2,
+      speed: 0.6 + rand() * 2.2,
+      size: 0.5 + rand() * 1.1
+    });
+    c.setHSL(0.58 + rand() * 0.1, 0.45, 0.72 + rand() * 0.26);
+    starMesh.setColorAt(i, c);
+  }
+  starMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  scene.add(starMesh);
+}
+
+/* ---------- 세나의 집 ---------- */
+function buildHouse() {
+  var list = [], wins = [];
+  var winSpots = [[-2, 4], [2, 4], [-2, -4], [2, -4], [4, 0], [-4, 0]];
+
+  for (var x = -4; x <= 4; x++)
+    for (var z = -4; z <= 4; z++)
+      for (var y = 0; y <= 4; y++) {
+        var isWin = (y === 2) && winSpots.some(function (p) { return p[0] === x && p[1] === z; });
+        if (isWin) { wins.push({ x: x, y: y, z: z, c: new THREE.Color(0xffd98f) }); continue; }
+        var c;
+        if (x === 0 && z === 4 && (y === 0 || y === 1)) {
+          c = new THREE.Color(0x6a4a2e).multiplyScalar(0.95 + rand() * 0.05);
+        } else {
+          c = new THREE.Color(0xeadfc9).multiplyScalar(0.86 + rand() * 0.14);
+        }
+        list.push({ x: x, y: y, z: z, c: c });
+      }
+
+  var roofHalf = [5, 4, 3, 2, 1];
+  roofHalf.forEach(function (h, li) {
+    for (var x = -h; x <= h; x++)
+      for (var z = -h; z <= h; z++)
+        list.push({ x: x, y: 5 + li, z: z, c: new THREE.Color(0xb25a6b).multiplyScalar(0.82 + rand() * 0.18) });
+  });
+
+  for (var y = 8; y <= 11; y++)
+    list.push({ x: 3, y: y, z: 3, c: new THREE.Color(0x7d7f8a).multiplyScalar(y === 11 ? 0.7 : 0.9 + rand() * 0.1) });
+
+  voxels(list);
+  voxels(wins, { mat: new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }), cast: false });
+
+  var smokeGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+  for (var i = 0; i < 3; i++) {
+    var m = new THREE.MeshBasicMaterial({ color: 0x9aa3b8, transparent: true, opacity: 0.4, fog: false });
+    var p = new THREE.Mesh(smokeGeo, m);
+    p.position.set(3, 12.4 + i * 1.6, 3);
+    scene.add(p);
+    smokePuffs.push({ mesh: p, t0: i / 3 });
+  }
+}
+
+/* ---------- 나무 ---------- */
+function buildTrees() {
+  var list = [];
+  var spots = [[-10, -7], [10, 5], [-7, 10]];
+  var greens = [0x1d4a33, 0x276044, 0x1a402e, 0x2f6b4c];
+  spots.forEach(function (s) {
+    var tx = s[0], tz = s[1];
+    for (var y = 0; y < 3; y++)
+      list.push({ x: tx, y: y, z: tz, c: new THREE.Color(0x5d4327).multiplyScalar(0.9 + rand() * 0.2) });
+    for (var x = -2; x <= 2; x++)
+      for (var z = -2; z <= 2; z++)
+        for (var y2 = 0; y2 < 3; y2++) {
+          if (Math.abs(x) === 2 && Math.abs(z) === 2 && y2 !== 1) continue;
+          list.push({ x: tx + x, y: 3 + y2, z: tz + z, c: new THREE.Color(greens[(rand() * 4) | 0]).multiplyScalar(0.8 + rand() * 0.4) });
+        }
+    for (var x2 = -1; x2 <= 1; x2++)
+      for (var z2 = -1; z2 <= 1; z2++)
+        if (!(Math.abs(x2) === 1 && Math.abs(z2) === 1))
+          list.push({ x: tx + x2, y: 6, z: tz + z2, c: new THREE.Color(greens[(rand() * 4) | 0]).multiplyScalar(0.85 + rand() * 0.35) });
+  });
+  voxels(list);
+}
+
+/* ---------- 울타리 (앞문에 문틈) ---------- */
+function buildFence() {
+  var items = [], posts = [];
+  var minD = 13.7 * 13.7, maxD = 15.3 * 15.3;
+  for (var x = -16; x <= 16; x++)
+    for (var z = -16; z <= 16; z++) {
+      var d2 = x * x + z * z;
+      if (d2 >= minD && d2 <= maxD) posts.push({ x: x, z: z });
+    }
+  posts = posts.filter(function (p) { return !(Math.abs(p.x) <= 1 && p.z >= 13); });
+  posts.forEach(function (p) {
+    items.push({ x: p.x, y: 0.5, z: p.z, c: new THREE.Color(0x7a5a36).multiplyScalar(0.92 + rand() * 0.16) });
+    items.push({ x: p.x, y: 1.5, z: p.z, c: new THREE.Color(0x8a6a42).multiplyScalar(0.9 + rand() * 0.2) });
+  });
+  var idx = {};
+  posts.forEach(function (p) { idx[p.x + ',' + p.z] = true; });
+  posts.forEach(function (p) {
+    [[1, 0], [0, 1]].forEach(function (d) {
+      if (idx[(p.x + d[0]) + ',' + (p.z + d[1])])
+        items.push({ x: p.x + d[0] / 2, y: 1, z: p.z + d[1] / 2, c: new THREE.Color(0x6b4f30) });
+    });
+  });
+  voxels(items, { cast: false });
+}
+
+/* ---------- 반딧불이 ---------- */
+function buildFireflies() {
+  var geo = new THREE.BoxGeometry(0.24, 0.24, 0.24);
+  for (var i = 0; i < 14; i++) {
+    var mat = new THREE.MeshBasicMaterial({ color: 0xd9ff7e, fog: false, transparent: true, opacity: 0.9 });
+    var m = new THREE.Mesh(geo, mat);
+    var a = rand() * Math.PI * 2, r = 4 + rand() * 11;
+    m.position.set(Math.cos(a) * r, 1 + rand() * 3.5, Math.sin(a) * r);
+    scene.add(m);
+    fireflies.push({
+      mesh: m, bx: m.position.x, bz: m.position.z, y0: m.position.y,
+      ph: rand() * Math.PI * 2, rs: 0.25 + rand() * 0.5,
+      rad: 0.8 + rand() * 1.8, ys: 0.6 + rand() * 0.9
+    });
+  }
+}
+
+/* ---------- 유성 ---------- */
+function spawnShootingStar() {
+  var geo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+  var head = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }));
+  head.position.set(-34 + Math.random() * 60, 46 + Math.random() * 16, -26 - Math.random() * 30);
+  var vel = new THREE.Vector3(1, -0.42, 0.1).normalize().multiplyScalar(30);
+  var tail = [];
+  for (var i = 0; i < 7; i++)
+    tail.push(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xbfd4ff, transparent: true, opacity: 0.4 * (1 - i / 8), fog: false })));
+  scene.add(head);
+  tail.forEach(function (t) { scene.add(t); });
+  shoot = { head: head, tail: tail, vel: vel, life: 0 };
+}
+
+/* ---------- 애니메이션 루프 ---------- */
+var _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _s = new THREE.Vector3();
+
+function animate() {
+  requestAnimationFrame(animate);
+  var dt = Math.min(clock.getDelta(), 0.05);
+  var t = clock.elapsedTime;
+  var i;
+
+  // 별 반짝임
+  for (i = 0; i < starData.length; i++) {
+    var d = starData[i];
+    var tw = 0.7 + 0.4 * Math.sin(t * d.speed + d.phase);
+    _s.setScalar(d.size * tw);
+    _v.set(d.x, d.y, d.z);
+    _m.compose(_v, _q, _s);
+    starMesh.setMatrixAt(i, _m);
+  }
+  starMesh.instanceMatrix.needsUpdate = true;
+
+  // 반딧불이 떠다님
+  fireflies.forEach(function (f) {
+    var a = t * f.rs + f.ph;
+    f.mesh.position.x = f.bx + Math.cos(a) * f.rad;
+    f.mesh.position.z = f.bz + Math.sin(a * 0.8) * f.rad;
+    f.mesh.position.y = f.y0 + Math.sin(t * f.ys + f.ph) * 0.7;
+    f.mesh.material.opacity = 0.45 + 0.5 * (0.5 + 0.5 * Math.sin(t * 1.7 + f.ph * 3));
+  });
+
+  // 굴뚝 연기
+  smokePuffs.forEach(function (p) {
+    var life = (t * 0.18 + p.t0) % 1;
+    p.mesh.position.y = 12.2 + life * 5.2;
+    p.mesh.position.x = 3 + Math.sin((t + p.t0 * 7) * 0.9) * 0.35 * life;
+    p.mesh.material.opacity = 0.42 * (1 - life);
+    p.mesh.scale.setScalar(0.45 + life * 0.9);
+  });
+
+  // 창문의 따뜻한 불빛 (조금 흔들림)
+  houseLight.intensity = 1.12 + Math.sin(t * 7.3) * 0.05 + Math.sin(t * 13.7) * 0.03;
+
+  // 유성
+  if (shoot) {
+    shoot.life += dt;
+    shoot.head.position.addScaledVector(shoot.vel, dt);
+    shoot.tail.forEach(function (s, j) {
+      s.position.copy(shoot.head.position).addScaledVector(shoot.vel, -0.35 * (j + 1));
+      s.material.opacity = Math.max(0, 0.55 * (1 - (j + 1) / 8) * (1 - shoot.life / 2.2));
+    });
+    if (shoot.life > 2.2 || shoot.head.position.y < 4) {
+      scene.remove(shoot.head);
+      shoot.tail.forEach(function (s) { scene.remove(s); });
+      shoot = null;
+      shootTimer = 3 + Math.random() * 6;
+    }
+  } else {
+    shootTimer -= dt;
+    if (shootTimer <= 0) spawnShootingStar();
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
