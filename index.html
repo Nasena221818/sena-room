@@ -26,6 +26,19 @@
     font-family:"Segoe UI","Malgun Gothic",sans-serif; font-size:11px;
     color:#9fb0e6; opacity:0.5; pointer-events:none; user-select:none;
   }
+  .garden {
+    position:fixed; bottom:18px; left:22px;
+    font-family:"Segoe UI","Malgun Gothic",sans-serif; font-size:11px;
+    color:#b9a7d6; text-decoration:none; letter-spacing:0.5px;
+    padding:7px 13px; border:1px solid rgba(151,126,208,0.35); border-radius:14px;
+    background:rgba(20,16,44,0.55); backdrop-filter:blur(6px);
+    transition:all .25s ease; user-select:none;
+  }
+  .garden:hover {
+    color:#e6d9ff; border-color:rgba(185,167,214,0.8);
+    background:rgba(43,34,80,0.75);
+    text-shadow:0 0 10px rgba(185,167,214,0.6);
+  }
 </style>
 </head>
 <body>
@@ -37,6 +50,7 @@
   </div>
   <div class="hint">drag to look · pinch / scroll to zoom · double-tap to toggle lights</div>
   <div id="lightbtn" class="hint" style="left:auto; right:22px; transform:none; cursor:pointer; opacity:0.85;">💡 불 켜짐 &nbsp;(L)</div>
+  <a class="garden" href="night-garden/index.html" title="밤정원으로 가요">✦ 밤정원</a>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
