@@ -433,15 +433,21 @@ function skyPlaqueTexture() {
 
 function buildSkyPlaque() {
   var tex = skyPlaqueTexture();
-  var board = new THREE.Mesh(
-    new THREE.PlaneGeometry(4.8, 3.75),
-    new THREE.MeshBasicMaterial({ map: tex, fog: false, side: THREE.DoubleSide })
-  );
+  // 앞·뒷면을 각각 따로 새겨서, 어느 쪽에서 봐도 글자가 정방향으로 읽히게
+  var geo = new THREE.PlaneGeometry(4.8, 3.75);
+  var mat = function () { return new THREE.MeshBasicMaterial({ map: tex, fog: false }); };
+  var faceA = new THREE.Mesh(geo, mat());
+  var faceB = new THREE.Mesh(geo, mat());
   var bx = 11, bz = 11, by = 2.7;
-  board.position.set(bx, by, bz);
+  faceA.position.set(bx, by, bz);
+  faceB.position.set(bx, by, bz);
   // 정원 중심(=카메라 시작 방향)을 향하게
-  board.rotation.y = Math.atan2(-bx, -bz);
-  scene.add(board);
+  var a = Math.atan2(-bx, -bz);
+  faceA.rotation.y = a;
+  faceB.rotation.y = a + Math.PI;
+  scene.add(faceA);
+  scene.add(faceB);
+  var board = faceA;
 
   // 뒤에서 은은한 빛
   var glow = new THREE.Sprite(new THREE.SpriteMaterial({
